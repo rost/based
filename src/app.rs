@@ -184,3 +184,65 @@ fn handle_error(err: sqlx::error::Error) -> (StatusCode, axum::Json<serde_json::
     let msg = axum::Json(json!({ "error": format!("{}", &err) }));
     (StatusCode::INTERNAL_SERVER_ERROR, msg)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::{
+        body::Body,
+        http::{Request, StatusCode},
+    };
+    use http_body_util::BodyExt; // for `collect`
+    use serde_json::{json, Value};
+    use tokio::net::TcpListener;
+    use tower::ServiceExt; // for `call`, `oneshot`, and `ready`
+
+    #[tokio::test]
+    async fn unit_check_status() {
+        let state = AppState::new().await.unwrap();
+        let app = router().with_state(state);
+
+        let response = app
+            .oneshot(Request::builder().uri("/_status").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let body: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(body, json!({"status": "ok"}));
+    }
+
+    #[tokio::test]
+    async fn integration_check_status() {
+        let state = AppState::new().await.unwrap();
+        let app = router().with_state(state);
+
+        let listener = TcpListener::bind("0.0.0.0:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        let client =
+            hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
+                .build_http();
+
+        let response = client
+            .request(
+                Request::builder()
+                    .uri(format!("http://{addr}/_status"))
+                    .header("Host", "localhost")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let body: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(body, json!({"status": "ok"}));
+    }
+}
