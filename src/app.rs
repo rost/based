@@ -245,4 +245,28 @@ mod tests {
         let body: Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(body, json!({"status": "ok"}));
     }
+
+    #[tokio::test]
+    async fn create_user() {
+        let state = AppState::new().await.unwrap();
+        let app = router().with_state(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/users")
+                    .method("POST")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(r#"{"name":"test"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::CREATED);
+
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let body: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(body, json!({"id": 1, "name": "test"}));
+    }
 }
